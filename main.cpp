@@ -1,6 +1,9 @@
 #include "obse/PluginAPI.h"
 #include "obse/CommandTable.h"
 
+#include "OBSEKeywords/KeywordAPI.h"
+#include "Hooks.h"
+
 #if OBLIVION
 #include "obse/GameAPI.h"
 
@@ -9,15 +12,6 @@
 	To make it easier to update plugins to account for this, the following can be used.
 	It requires that g_scriptInterface is assigned correctly when the plugin is first loaded.
 */
-#define ENABLE_EXTRACT_ARGS_MACROS 1	// #define this as 0 if you prefer not to use this
-
-#if ENABLE_EXTRACT_ARGS_MACROS
-
-OBSEScriptInterface* g_scriptInterface = NULL;	// make sure you assign to this
-#define ExtractArgsEx(...) g_scriptInterface->ExtractArgsEx(__VA_ARGS__)
-#define ExtractFormatStringArgs(...) g_scriptInterface->ExtractFormatStringArgs(__VA_ARGS__)
-
-#endif
 
 #else
 #include "obse_editor/EditorAPI.h"
@@ -27,19 +21,27 @@ OBSEScriptInterface* g_scriptInterface = NULL;	// make sure you assign to this
 #include "obse/Script.h"
 #include "obse/GameObjects.h"
 #include <string>
-#include <Patches.h>
 
-IDebugLog		gLog("GPEngineFixes.log");
+IDebugLog		gLog("MediumArmor.log");
 
 PluginHandle				g_pluginHandle = kPluginHandle_Invalid;
 
 OBSEMessagingInterface* g_msg;
 
+void UnifiedMessageHandler(OBSEMessagingInterface::Message* msg)
+{
+	KeywordAPI::MessageHandler(msg);
+}
+
 void MessageHandler(OBSEMessagingInterface::Message* msg)
 {
 	switch (msg->type)
 	{
+	case OBSEMessagingInterface::kMessage_PostLoad:
+		g_msg->RegisterListener(g_pluginHandle, nullptr, UnifiedMessageHandler);
+		break;
 	case OBSEMessagingInterface::kMessage_LoadGame:
+		MediumArmor::InstallHooks();
 		break;
 	default:
 		break;
@@ -53,7 +55,7 @@ extern "C" {
 
 		// fill out the info structure
 		info->infoVersion = PluginInfo::kInfoVersion;
-		info->name = "GPEngineFixes";
+		info->name = "MediumArmor";
 		info->version = 1;
 
 		// version checks
@@ -73,27 +75,18 @@ extern "C" {
 			}
 #endif
 		}
-		else
-		{
-			// no version checks needed for editor
-		}
-
-		// version checks pass
 
 		return true;
 	}
 
-	bool OBSEPlugin_Load(const OBSEInterface* obse)
+	bool OBSEPlugin_Load(OBSEInterface* OBSE)
 	{
+		g_pluginHandle = OBSE->GetPluginHandle();
 
-		g_pluginHandle = obse->GetPluginHandle();
+		g_msg = static_cast<OBSEMessagingInterface*>(OBSE->QueryInterface(kInterface_Messaging));
+		g_msg->RegisterListener(g_pluginHandle, "OBSE", MessageHandler);
 
-		// register to receive messages from OBSE
-		OBSEMessagingInterface* msgIntfc = (OBSEMessagingInterface*)obse->QueryInterface(kInterface_Messaging);
-		msgIntfc->RegisterListener(g_pluginHandle, "OBSE", MessageHandler);
-		g_msg = msgIntfc;
-
-		GPEngineFixes::Patches::Install();
+		KeywordAPI::Init(g_msg, g_pluginHandle);
 
 		return true;
 	}

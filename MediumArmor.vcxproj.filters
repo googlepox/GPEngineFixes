@@ -1,0 +1,50 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="dllmain.c" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="Hooks.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="Commands.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="MediumArmor.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\xOBSE\obse\obse_common\SafeWrite.cpp">
+      <Filter>obse</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="exports.def" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{348daa12-b2d4-4cea-bb1c-d83874104689}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{3b20279d-cb50-491f-850b-6a228200738a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="obse">
+      <UniqueIdentifier>{7edd77bb-e896-40a6-be07-8d01df982faf}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Hooks.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\OBSEKeywords\KeywordAPI.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="Config.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="Commands.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="MediumArmor.h">
+      <Filter>include</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

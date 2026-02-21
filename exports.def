@@ -1,4 +1,4 @@
-LIBRARY	"GPEngineFixes"
+LIBRARY	"MediumArmor"
 EXPORTS
 OBSEPlugin_Query
 OBSEPlugin_Load
