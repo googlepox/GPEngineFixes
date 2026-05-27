@@ -21,6 +21,7 @@
 #include "obse/Script.h"
 #include "obse/GameObjects.h"
 #include <string>
+#include <MediumArmor.h>
 
 IDebugLog		gLog("MediumArmor.log");
 
@@ -42,6 +43,7 @@ void MessageHandler(OBSEMessagingInterface::Message* msg)
 		break;
 	case OBSEMessagingInterface::kMessage_LoadGame:
 		MediumArmor::InstallHooks();
+		MediumArmor::SyncSkillFromMenuQue();
 		break;
 	default:
 		break;
