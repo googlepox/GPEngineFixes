@@ -60,7 +60,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)\..;$(SolutionDir)\..\xobse\obse;$(SolutionDir)\..\xobse\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\brand\Desktop\GameDev\OB\xOBSE\boost_1_86_0;$(SolutionDir);$(SolutionDir)\..;$(SolutionDir)\..\xobse\obse;$(SolutionDir)\..\xobse\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;OBLIVION_VERSION=0x010201A0;OBLIVION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
@@ -127,6 +127,7 @@
     <None Include="exports.def" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\EditorIDMapper\EditorIDMapperAPI.h" />
     <ClInclude Include="..\OBSEKeywords\KeywordAPI.h" />
     <ClInclude Include="Commands.h" />
     <ClInclude Include="Config.h" />

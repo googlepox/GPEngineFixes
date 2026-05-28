@@ -16,6 +16,9 @@
 #include <algorithm>
 #include <cmath>
 #include <obse/ModTable.h>
+#include <EditorIDMapper/EditorIDMapperAPI.h>
+
+#include <boost/algorithm/string.hpp>
 
 namespace MediumArmor
 {
@@ -23,7 +26,16 @@ namespace MediumArmor
     // ── Internal state ─────────────────────────────────────────────────────────
     TESGlobal* g_mediumArmorGlobal;
     TESGlobal* g_mediumArmorXPGlobal;
-    static float s_mediumArmorSkill = 5.0f;   // default starting value
+    static float MA_SKILL_START = 5.0f;
+    std::vector<std::string> MA_MATERIALS = { "medium", "mithril", "dragonscale", 
+        "bonemold", "orcish", "chainmail", "ordinator", "dreugh", "maomer", 
+        "maormer", "leatherhard", "brass", "bronze", "adamantium", "jade",
+        "indoril", "trollbone", "netchad"};
+
+    std::unordered_map<std::string, float*> configMap =
+    {
+        { "MA_SKILL_START",   &MA_SKILL_START },
+    };
 
     // ════════════════════════════════════════════════════════════════════════════
     //  Keyword interface
@@ -31,24 +43,31 @@ namespace MediumArmor
 
     bool HasKeyword(TESForm* form, const char* keyword)
     {
-        // ┌──────────────────────────────────────────────────────────────────────┐
-        // │  STUB — Replace this with your Keyword mod's actual API.            │
-        // │                                                                     │
-        // │  Option A – If your keyword plugin exposes a C++ function:          │
-        // │      return YourKeywordLib::FormHasKeyword(form, keyword);          │
-        // │                                                                     │
-        // │  Option B – If it works via OBSE inter-plugin messaging:            │
-        // │      Send a message through OBSEMessagingInterface and cache the    │
-        // │      reply.  See main.cpp MessageHandler for the dispatch pattern.  │
-        // │                                                                     │
-        // │  Option C – Lightweight fallback: check the form's EditorID for a   │
-        // │      substring.  Shown below as a temporary stand-in.               │
-        // └──────────────────────────────────────────────────────────────────────┘
-
         if (!form || !keyword)
             return false;
 
         return KeywordAPI::HasKeyword(form->refID, keyword);
+    }
+
+    bool IsMediumArmorMaterial(TESForm* form)
+    {
+        std::string editorID = EditorIDMapper::ReverseLookup(form->refID);
+
+        if (editorID.empty())
+            editorID = form->GetEditorName();
+
+        if (editorID.empty())
+            return false;
+
+        boost::algorithm::to_lower(editorID);
+
+        for (const auto& material : MA_MATERIALS)
+        {
+            if (editorID.contains(material))
+                return true;
+        }
+
+        return false;
     }
 
     bool IsMediumArmor(TESForm* form)
@@ -56,11 +75,17 @@ namespace MediumArmor
         if (!form)
             return false;
 
-        // Only armour forms can be medium armour.
         if (form->typeID != kFormType_Armor)
             return false;
 
-        return HasKeyword(form, kMediumArmorKeyword);
+        bool hasKeyword = HasKeyword(form, kMediumArmorKeyword);
+        
+        if (!hasKeyword)
+        {
+            return IsMediumArmorMaterial(form);
+        }
+
+        return hasKeyword;
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -69,12 +94,12 @@ namespace MediumArmor
 
     float GetMediumArmorSkill()
     {
-        return s_mediumArmorSkill;
+        return MA_SKILL_START;
     }
 
     void SetMediumArmorSkill(float value)
     {
-        s_mediumArmorSkill = std::clamp(value, 0.0f, 100.0f);
+        MA_SKILL_START = std::clamp(value, 0.0f, 100.0f);
     }
 
     void SyncSkillFromMenuQue()
@@ -87,7 +112,7 @@ namespace MediumArmor
         TESForm* globalForm =  LookupFormByID(fullID);
         g_mediumArmorGlobal = OBLIVION_CAST(globalForm, TESForm, TESGlobal);
         if (!g_mediumArmorGlobal) return;
-        s_mediumArmorSkill = g_mediumArmorGlobal->data;
+        MA_SKILL_START = g_mediumArmorGlobal->data;
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -188,6 +213,68 @@ namespace MediumArmor
         if (skill >= 50.0f)  return 2;  // Journeyman
         if (skill >= 25.0f)  return 1;  // Apprentice
         return 0;                        // Novice
+    }
+
+    void LoadConfig()
+    {
+        std::ifstream file("Data\\OBSE\\Plugins\\MediumArmor\\Config.ini");
+        if (!file.is_open())
+        {
+            _MESSAGE("Config.ini not found");
+            return;
+        }
+
+        std::string line;
+        enum Section { NONE, CONFIG, MATERIALS } section = NONE;
+
+        while (std::getline(file, line))
+        {
+            if (line.empty() || line[0] == ';')
+                continue;
+
+            if (line[0] == '[')
+            {
+                if (line == "[Config]") section = CONFIG;
+                else if (line == "[Materials]") section = MATERIALS;
+                else section = NONE;
+                continue;
+            }
+
+            std::stringstream ss(line);
+
+            if (section == CONFIG)
+            {
+                std::string key, value;
+
+                std::getline(ss, key, ',');
+                std::getline(ss, value);
+
+                float f = std::stof(value);
+
+                auto it = configMap.find(key);
+                if (it != configMap.end())
+                {
+                    *it->second = f;
+                }
+            }
+            else if (section == MATERIALS)
+            {
+                MA_MATERIALS.clear();
+
+                std::string material;
+
+                while (std::getline(ss, material, ','))
+                {
+                    boost::algorithm::trim(material);
+                    boost::algorithm::to_lower(material);
+
+                    if (!material.empty())
+                    {
+                        MA_MATERIALS.push_back(material);
+                    }
+                }
+            }
+        }
     }
 
 }  // namespace MediumArmorPlugin

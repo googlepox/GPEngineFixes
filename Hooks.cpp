@@ -6,7 +6,7 @@
 //  Hook 1 — sub_488CB0 (per-piece combat AR wrapper)
 //      Bypasses vanilla skill lookup; uses GetMediumArmorSkill() directly.
 //
-//  Hook 2 — ISHeavyArmor
+//  Hook 2 — IsHeavyArmor
 //      Returns false for medium armor so engine classifies it as non-heavy.
 //
 //  Hook 3 — GetArmorSkillAV (flag setter)
@@ -30,11 +30,11 @@
 #include "obse/GameAPI.h"
 #include "obse/GameObjects.h"
 #include "obse/GameForms.h"
-#include "obse_common/SafeWrite.h"
 
 #include <cmath>
 #include <algorithm>
 #include <windows.h>
+#include <obse_common/SafeWrite.h>
 
 namespace MediumArmor
 {
@@ -50,7 +50,7 @@ namespace MediumArmor
         constexpr UInt32 Sub_488CB0_Resume = 0x00488CB9;  // push ebp
 
         // Hook 2: heavy armor classification
-        constexpr UInt32 ISHeavyArmor = 0x004B4C70;  // 7 bytes
+        constexpr UInt32 IsHeavyArmor = 0x004B4C70;  // 7 bytes
 
         // Hook 3: armor skill AV code lookup
         constexpr UInt32 GetArmorSkillAV = 0x004B4C80;  // 16 bytes (0x10)
@@ -60,7 +60,7 @@ namespace MediumArmor
 
         // Hook 5: encumbrance — mid-function in GetEncumbrance, light armor path
         //   488057: 8B CD              mov ecx, ebp          ; 2 bytes
-        //   488059: E8 xx xx xx xx     call ISHeavyArmor     ; 5 bytes
+        //   488059: E8 xx xx xx xx     call IsHeavyArmor     ; 5 bytes
         //   48805E: ...                ← resume here (test al, al)
         constexpr UInt32 Encumbrance_Hook = 0x00488057;  // 7 bytes
         constexpr UInt32 Encumbrance_Resume = 0x0048805E;  // after stolen bytes (test al,al)
@@ -68,7 +68,7 @@ namespace MediumArmor
 
         // Hook 6: degradation — mid-function in DamageEquippedItem, light path
         //   5F38EE: 8B CD              mov ecx, ebp          ; 2 bytes
-        //   5F38F0: E8 xx xx xx xx     call ISHeavyArmor     ; 5 bytes
+        //   5F38F0: E8 xx xx xx xx     call IsHeavyArmor     ; 5 bytes
         //   5F38F5: ...                ← resume here (test al, al)
         constexpr UInt32 Degradation_Hook = 0x005F38EE;  // 7 bytes
         constexpr UInt32 Degradation_Resume = 0x005F38F5;  // vanilla light path continues
@@ -81,6 +81,11 @@ namespace MediumArmor
         constexpr UInt32 SkillXP_Hook = 0x005FFC81;  // 5 bytes
         constexpr UInt32 SkillXP_Resume = 0x005FFC86;  // fldz (vanilla continues)
         constexpr UInt32 SkillXP_Skip = 0x005FFCA4;  // past AwardSkillUsage call
+
+        // Hook 8: spell effectiveness — replace call to Calc_ArmorSpellEffectiveness
+        //   65DBCA: E8 xx xx xx xx     call Calc_ArmorSpellEffectiveness  ; 5 bytes
+        //   Target address extracted at init from the call's rel32 operand.
+        constexpr UInt32 SpellEff_Hook = 0x0065DBCA;  // 5 bytes
 
         // Float constant loaded in sub_488CB0 stolen prologue
         constexpr UInt32 FloatConst = 0x00A30634;
@@ -95,11 +100,12 @@ namespace MediumArmor
     // ════════════════════════════════════════════════════════════════════════════
 
     constexpr UInt32 kStolenBytes_488CB0 = 9;   // sub esp,0Ch + fld [...]
-    constexpr UInt32 kStolenBytes_ISHeavyArmor = 7;   // mov al,[ecx+6Ah] + shr al,7 + retn
+    constexpr UInt32 kStolenBytes_IsHeavyArmor = 7;   // mov al,[ecx+6Ah] + shr al,7 + retn
     constexpr UInt32 kStolenBytes_SkillAV = 16;  // entire function (0x10 bytes)
-    constexpr UInt32 kStolenBytes_Encumbrance = 7;   // mov ecx,ebp + call ISHeavyArmor
-    constexpr UInt32 kStolenBytes_Degradation = 7;   // mov ecx,ebp + call ISHeavyArmor
+    constexpr UInt32 kStolenBytes_Encumbrance = 7;   // mov ecx,ebp + call IsHeavyArmor
+    constexpr UInt32 kStolenBytes_Degradation = 7;   // mov ecx,ebp + call IsHeavyArmor
     constexpr UInt32 kStolenBytes_SkillXP = 5;   // call IsHeavyArmor (exactly 5)
+    constexpr UInt32 kStolenBytes_SpellEff = 5;   // call Calc_ArmorSpellEffectiveness
     // Calc_ArmorRating stolen bytes — set after prologue dump
     static UInt32    s_stolenBytes_CalcAR = 0;
 
@@ -124,12 +130,13 @@ namespace MediumArmor
     // ════════════════════════════════════════════════════════════════════════════
 
     static UInt8 s_origBytes_488CB0[kStolenBytes_488CB0];
-    static UInt8 s_origBytes_IHA[kStolenBytes_ISHeavyArmor];
+    static UInt8 s_origBytes_IHA[kStolenBytes_IsHeavyArmor];
     static UInt8 s_origBytes_SkillAV[kStolenBytes_SkillAV];
     static UInt8 s_origBytes_CalcAR[16];  // max we'd ever steal
     static UInt8 s_origBytes_Encumbrance[kStolenBytes_Encumbrance];
     static UInt8 s_origBytes_Degradation[kStolenBytes_Degradation];
     static UInt8 s_origBytes_SkillXP[kStolenBytes_SkillXP];
+    static UInt8 s_origBytes_SpellEff[kStolenBytes_SpellEff];
     static bool  s_hookInstalled = false;
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -199,7 +206,7 @@ namespace MediumArmor
     //  Close namespace for file-scope ASM-visible globals
     // ════════════════════════════════════════════════════════════════════════════
 
-}  // close MediumArmor namespace temporarily
+}  // close MediumArmorPlugin namespace temporarily
 
 // ── ASM-callable function pointers ─────────────────────────────────────────
 static bool(__cdecl* s_fnIsMediumArmor)(TESForm*) = nullptr;
@@ -226,7 +233,7 @@ static float(__cdecl* s_fnGetMediumSkill)() = &GetMediumSkillWithMods;
 // ── Encumbrance hook (Hook 5) globals ──────────────────────────────────────
 static UInt32 s_resumeAddr_Enc = 0;   // → 0x48805E (test al, al — vanilla light path)
 static UInt32 s_skipAddr_Enc = 0;   // → 0x488086 (past all perk logic)
-static UInt32 s_addrISHeavyArmor = 0; // → 0x4B4C70 (for indirect call in stolen bytes)
+static UInt32 s_addrIsHeavyArmor = 0; // → 0x4B4C70 (for indirect call in stolen bytes)
 
 // Static float constants for FPU multiply in naked ASM
 static float s_expertEncumMult = MediumArmor::kPerkExpertEncumbranceMult;  // 0.5
@@ -254,6 +261,107 @@ static void __cdecl AwardMediumArmorXP()
 }
 static void(__cdecl* s_fnAwardMediumXP)() = &AwardMediumArmorXP;
 
+// ── Spell effectiveness hook (Hook 8) globals ───────────────────────────────
+// Original Calc_ArmorSpellEffectiveness — extracted from call site at init
+typedef double(__cdecl* fnCalcSpellEff)(int, int, int, int);
+static fnCalcSpellEff s_fnCalcSpellEff = nullptr;
+
+// Actor captured by naked thunk so C++ function can access it
+static Actor* s_actorForSpellCalc = nullptr;
+
+// Game setting floats (game settings loaded into these addresses at startup)
+static const float* s_fMagicPenaltyMin = reinterpret_cast<const float*>(0xB37F50);
+static const float* s_fMagicPenaltyMax = reinterpret_cast<const float*>(0xB37F58);
+
+// Per-slot coverage game settings (ints, already loaded at startup)
+static const int* s_iHelmChance = reinterpret_cast<const int*>(0xB36EC8);
+static const int* s_iCuirassChance = reinterpret_cast<const int*>(0xB36EB8);
+static const int* s_iGreavesChance = reinterpret_cast<const int*>(0xB36EC0);
+static const int* s_iGauntletsChance = reinterpret_cast<const int*>(0xB36ED0);
+static const int* s_iBootsChance = reinterpret_cast<const int*>(0xB36ED8);
+static const int* s_iShieldChance = reinterpret_cast<const int*>(0xB36EE0);
+
+// Computes medium-armor-only coverage using partMask (bipedModel at armo+0x64, partMask at +0x04)
+static int __cdecl GetMediumArmorCoverage(Actor* actor)
+{
+    if (!actor) return 0;
+
+    int coverage = 0;
+
+    ExtraContainerChanges* xChanges = static_cast<ExtraContainerChanges*>(
+        actor->baseExtraList.GetByType(kExtraData_ContainerChanges));
+
+    if (!xChanges || !xChanges->data || !xChanges->data->objList)
+        return 0;
+
+    for (auto iter = xChanges->data->objList->Begin(); !iter.End(); ++iter)
+    {
+        ExtraContainerChanges::EntryData* entry = iter.Get();
+        if (!entry || !entry->type)
+            continue;
+
+        // Only equipped medium armor pieces
+        bool worn = false;
+        if (entry->extendData)
+        {
+            for (auto xIter = entry->extendData->Begin(); !xIter.End(); ++xIter)
+            {
+                ExtraDataList* xList = xIter.Get();
+                if (xList && (xList->HasType(kExtraData_Worn) ||
+                    xList->HasType(kExtraData_WornLeft)))
+                {
+                    worn = true;
+                    break;
+                }
+            }
+        }
+        if (!worn) continue;
+        if (!MediumArmor::IsMediumArmor(entry->type)) continue;
+
+        // Read partMask: bipedModel at armo+0x64, partMask at +0x04 → armo+0x68
+        UInt32 partMask = *reinterpret_cast<const UInt32*>(
+            reinterpret_cast<const UInt8*>(entry->type) + 0x68);
+
+        if (partMask & (1 << 0))  coverage += *s_iHelmChance;      // Head
+        if (partMask & (1 << 1))  coverage += *s_iHelmChance;      // Hair (same chance)
+        if (partMask & (1 << 2))  coverage += *s_iCuirassChance;   // UpperBody
+        if (partMask & (1 << 3))  coverage += *s_iGreavesChance;   // LowerBody
+        if (partMask & (1 << 4))  coverage += *s_iGauntletsChance; // Hand
+        if (partMask & (1 << 5))  coverage += *s_iBootsChance;     // Foot
+        if (partMask & (1 << 13)) coverage += *s_iShieldChance;    // Shield
+    }
+
+    return std::clamp(coverage, 0, 100);
+}
+
+// Full three-category spell effectiveness formula
+static double __cdecl Calc_SpellEffectivenessWithMedium(
+    int lightSkill, int lightCoverage, int heavySkill, int heavyCoverage)
+{
+    Actor* actor = s_actorForSpellCalc;
+
+    int medCoverage = GetMediumArmorCoverage(actor);
+    int adjLightCoverage = std::max(0, lightCoverage - medCoverage);
+
+    // Call vanilla with corrected light coverage
+    double result = s_fnCalcSpellEff(lightSkill, adjLightCoverage, heavySkill, heavyCoverage);
+    // Add medium penalty term using same formula as vanilla
+    if (medCoverage > 0)
+    {
+        float penaltyMin = *s_fMagicPenaltyMin;
+        float penaltyMax = *s_fMagicPenaltyMax;
+        float medSkill = MediumArmor::GetMediumArmorSkill();
+
+        // Penalty = 0 at skill >= 100; scales up as skill drops toward 0
+        double medPenalty = 0.0;
+        int skillCapped = std::min(static_cast<int>(medSkill), 100);
+        medPenalty = (medCoverage / 100.0) * (2 * (50 - skillCapped));
+
+        result -= static_cast<double>(penaltyMax - penaltyMin) * medPenalty / 100.0;
+    }
+    return std::clamp(result, 0.0, 1.0);
+}
+
 // Helper: returns medium mastery level as int
 static int __cdecl GetMediumMasteryLevel()
 {
@@ -263,11 +371,11 @@ static int __cdecl GetMediumMasteryLevel()
 static int(__cdecl* s_fnGetMediumMastery)() = &GetMediumMasteryLevel;
 
 // ════════════════════════════════════════════════════════════════════════════
-//  Hook 2 — ISHeavyArmor detour  (0x004B4C70)
+//  Hook 2 — IsHeavyArmor detour  (0x004B4C70)
 //  Medium → return false.  Otherwise → original logic.
 // ════════════════════════════════════════════════════════════════════════════
 
-static __declspec(naked) void Detour_ISHeavyArmor()
+static __declspec(naked) void Detour_IsHeavyArmor()
 {
     __asm
     {
@@ -375,9 +483,9 @@ static __declspec(naked) void Detour_CalcArmorRating()
 // ════════════════════════════════════════════════════════════════════════════
 //  Hook 5 — Encumbrance mid-function detour  (0x00488057)
 //  ────────────────────────────────────────────────────────────────────────
-//  Replaces the redundant ISHeavyArmor call in GetEncumbrance's light path.
+//  Replaces the redundant IsHeavyArmor call in GetEncumbrance's light path.
 //
-//  Stolen: mov ecx, ebp (2) + call ISHeavyArmor (5) = 7 bytes
+//  Stolen: mov ecx, ebp (2) + call IsHeavyArmor (5) = 7 bytes
 //
 //  Register contract at entry:
 //    EBP = TESObjectARMO*  (the armor piece being evaluated)
@@ -405,7 +513,7 @@ static __declspec(naked) void Detour_Encumbrance()
 
         // ── Not medium: execute stolen bytes, resume vanilla light path ────
         mov     ecx, ebp                    // stolen byte 1
-        call[s_addrISHeavyArmor]        // stolen byte 2 (indirect thiscall)
+        call[s_addrIsHeavyArmor]        // stolen byte 2 (indirect thiscall)
         jmp[s_resumeAddr_Enc]          // → 0x48805E (test al, al)
 
         medium_enc:
@@ -435,9 +543,9 @@ static __declspec(naked) void Detour_Encumbrance()
 // ════════════════════════════════════════════════════════════════════════════
 //  Hook 6 — Degradation mid-function detour  (0x005F38EE)
 //  ────────────────────────────────────────────────────────────────────────
-//  Replaces the redundant ISHeavyArmor call in DamageEquippedItem's light path.
+//  Replaces the redundant IsHeavyArmor call in DamageEquippedItem's light path.
 //
-//  Stolen: mov ecx, ebp (2) + call ISHeavyArmor (5) = 7 bytes
+//  Stolen: mov ecx, ebp (2) + call IsHeavyArmor (5) = 7 bytes
 //
 //  Register contract at entry (stack depth 0x24):
 //    EBP = TESObjectARMO*  (the armor piece taking damage)
@@ -465,7 +573,7 @@ static __declspec(naked) void Detour_Degradation()
 
         // ── Not medium: execute stolen bytes, resume vanilla light path ────
         mov     ecx, ebp                    // stolen byte 1
-        call[s_addrISHeavyArmor]        // stolen byte 2 (indirect thiscall)
+        call[s_addrIsHeavyArmor]        // stolen byte 2 (indirect thiscall)
         jmp[s_resumeAddr_Deg]          // → 0x5F38F5 (test al, al)
 
         medium_deg:
@@ -526,7 +634,7 @@ static __declspec(naked) void Detour_SkillXP()
         jnz     medium_xp
 
         // ── Not medium: call original IsHeavyArmor, resume vanilla ─────────
-        call[s_addrISHeavyArmor]        // thiscall, ECX already set
+        call[s_addrIsHeavyArmor]        // thiscall, ECX already set
         jmp[s_resumeAddr_XP]           // → 0x5FFC86 (fldz)
 
         medium_xp:
@@ -537,6 +645,26 @@ static __declspec(naked) void Detour_SkillXP()
             pop     edx
             pop     ecx
             jmp[s_skipAddr_XP]             // → 0x5FFCA4 (past AwardSkillUsage)
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Hook 8 — Spell effectiveness thunk  (0x0065DBCA)
+//  ────────────────────────────────────────────────────────────────────────
+//  Replaces the call to Calc_ArmorSpellEffectiveness.
+//
+//  At entry ESI = Actor*, stack = (lightSkill, lightCoverage,
+//                                   heavySkill, heavyCoverage, luck)  cdecl
+//
+//  We capture ESI for the C++ function then tail-call it with the same args.
+// ════════════════════════════════════════════════════════════════════════════
+
+static __declspec(naked) void Thunk_SpellEffectiveness()
+{
+    __asm
+    {
+        mov     dword ptr[s_actorForSpellCalc], esi
+        jmp     Calc_SpellEffectivenessWithMedium   // tail-call, same cdecl args
     }
 }
 
@@ -624,7 +752,7 @@ namespace MediumArmor
         }
 
         // ════════════════════════════════════════════════════════════════════════
-        //  Hook 2: ISHeavyArmor
+        //  Hook 2: IsHeavyArmor
         // ════════════════════════════════════════════════════════════════════════
         {
             const UInt8 expected[] = {
@@ -632,19 +760,19 @@ namespace MediumArmor
                 0xC0, 0xE8, 0x07,
                 0xC3
             };
-            if (memcmp(reinterpret_cast<void*>(Addr::ISHeavyArmor),
-                expected, kStolenBytes_ISHeavyArmor) != 0)
+            if (memcmp(reinterpret_cast<void*>(Addr::IsHeavyArmor),
+                expected, kStolenBytes_IsHeavyArmor) != 0)
             {
-                _ERROR("MediumArmor: ISHeavyArmor mismatch — skipping.");
+                _ERROR("MediumArmor: IsHeavyArmor mismatch — skipping.");
             }
             else
             {
-                memcpy(s_origBytes_IHA, reinterpret_cast<void*>(Addr::ISHeavyArmor),
-                    kStolenBytes_ISHeavyArmor);
-                WriteRelJump(Addr::ISHeavyArmor, reinterpret_cast<UInt32>(&Detour_ISHeavyArmor));
-                SafeWrite8(Addr::ISHeavyArmor + 5, 0x90);
-                SafeWrite8(Addr::ISHeavyArmor + 6, 0x90);
-                _MESSAGE("MediumArmor: Hook 2 (ISHeavyArmor) installed.");
+                memcpy(s_origBytes_IHA, reinterpret_cast<void*>(Addr::IsHeavyArmor),
+                    kStolenBytes_IsHeavyArmor);
+                WriteRelJump(Addr::IsHeavyArmor, reinterpret_cast<UInt32>(&Detour_IsHeavyArmor));
+                SafeWrite8(Addr::IsHeavyArmor + 5, 0x90);
+                SafeWrite8(Addr::IsHeavyArmor + 6, 0x90);
+                _MESSAGE("MediumArmor: Hook 2 (IsHeavyArmor) installed.");
             }
         }
 
@@ -779,7 +907,7 @@ namespace MediumArmor
             // Initialize encumbrance hook addresses
             s_resumeAddr_Enc = Addr::Encumbrance_Resume;
             s_skipAddr_Enc = Addr::Encumbrance_Skip;
-            s_addrISHeavyArmor = Addr::ISHeavyArmor;  // calls our Hook 2 detour
+            s_addrIsHeavyArmor = Addr::IsHeavyArmor;  // calls our Hook 2 detour
 
             // Expected bytes: 8B CD E8 xx xx xx xx  (mov ecx,ebp + call rel32)
             UInt8* p = reinterpret_cast<UInt8*>(Addr::Encumbrance_Hook);
@@ -853,6 +981,36 @@ namespace MediumArmor
             }
         }
 
+        // ════════════════════════════════════════════════════════════════════════
+        //  Hook 8: Spell effectiveness (replace Calc_ArmorSpellEffectiveness call)
+        // ════════════════════════════════════════════════════════════════════════
+        {
+            UInt8* p = reinterpret_cast<UInt8*>(Addr::SpellEff_Hook);
+            _MESSAGE("MediumArmor: SpellEff hook bytes: %02X %02X %02X %02X %02X",
+                p[0], p[1], p[2], p[3], p[4]);
+
+            if (p[0] != 0xE8)
+            {
+                _ERROR("MediumArmor: SpellEff hook mismatch — expected E8 (call). Skipping hook 8.");
+            }
+            else
+            {
+                // Extract vanilla Calc_ArmorSpellEffectiveness address from the call's rel32
+                SInt32 rel32 = *reinterpret_cast<SInt32*>(p + 1);
+                s_fnCalcSpellEff = reinterpret_cast<fnCalcSpellEff>(
+                    (Addr::SpellEff_Hook + 5) + static_cast<UInt32>(rel32));
+                _MESSAGE("MediumArmor: Calc_ArmorSpellEffectiveness resolved to 0x%08X",
+                    reinterpret_cast<UInt32>(s_fnCalcSpellEff));
+
+                memcpy(s_origBytes_SpellEff, p, kStolenBytes_SpellEff);
+                //WriteRelJump(Addr::SpellEff_Hook,
+                    //reinterpret_cast<UInt32>(&Thunk_SpellEffectiveness));
+                WriteRelCall(0x65DBCA,
+                    reinterpret_cast<UInt32>(&Thunk_SpellEffectiveness));
+                _MESSAGE("MediumArmor: Hook 8 (SpellEffectiveness) installed.");
+            }
+        }
+
         s_hookInstalled = true;
         _MESSAGE("MediumArmor: All hooks installed.");
         return true;
@@ -864,16 +1022,17 @@ namespace MediumArmor
             return;
 
         SafeWriteBuf(Addr::Sub_488CB0, s_origBytes_488CB0, kStolenBytes_488CB0);
-        SafeWriteBuf(Addr::ISHeavyArmor, s_origBytes_IHA, kStolenBytes_ISHeavyArmor);
+        SafeWriteBuf(Addr::IsHeavyArmor, s_origBytes_IHA, kStolenBytes_IsHeavyArmor);
         SafeWriteBuf(Addr::GetArmorSkillAV, s_origBytes_SkillAV, kStolenBytes_SkillAV);
         if (s_stolenBytes_CalcAR > 0)
             SafeWriteBuf(Addr::Calc_ArmorRating, s_origBytes_CalcAR, s_stolenBytes_CalcAR);
         SafeWriteBuf(Addr::Encumbrance_Hook, s_origBytes_Encumbrance, kStolenBytes_Encumbrance);
         SafeWriteBuf(Addr::Degradation_Hook, s_origBytes_Degradation, kStolenBytes_Degradation);
         SafeWriteBuf(Addr::SkillXP_Hook, s_origBytes_SkillXP, kStolenBytes_SkillXP);
+        SafeWriteBuf(Addr::SpellEff_Hook, s_origBytes_SpellEff, kStolenBytes_SpellEff);
 
         s_hookInstalled = false;
         _MESSAGE("MediumArmor: All hooks removed.");
     }
 
-}  // namespace MediumArmor
+}

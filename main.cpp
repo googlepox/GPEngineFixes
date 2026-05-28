@@ -2,6 +2,7 @@
 #include "obse/CommandTable.h"
 
 #include "OBSEKeywords/KeywordAPI.h"
+#include "EditorIDMapper/EditorIDMapperAPI.h"
 #include "Hooks.h"
 
 #if OBLIVION
@@ -32,6 +33,7 @@ OBSEMessagingInterface* g_msg;
 void UnifiedMessageHandler(OBSEMessagingInterface::Message* msg)
 {
 	KeywordAPI::MessageHandler(msg);
+	EditorIDMapper::MessageHandler(msg);
 }
 
 void MessageHandler(OBSEMessagingInterface::Message* msg)
@@ -88,6 +90,7 @@ extern "C" {
 		g_msg = static_cast<OBSEMessagingInterface*>(OBSE->QueryInterface(kInterface_Messaging));
 		g_msg->RegisterListener(g_pluginHandle, "OBSE", MessageHandler);
 
+		EditorIDMapper::Init(g_msg, g_pluginHandle);
 		KeywordAPI::Init(g_msg, g_pluginHandle);
 
 		return true;
