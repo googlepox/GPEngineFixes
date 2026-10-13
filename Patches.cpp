@@ -32,45 +32,9 @@ namespace GPEngineFixes::Patches
         }
     }
 
-    namespace GetDamageFix
-    {
-        void __declspec(naked) GetDamageHook()
-        {
-            __asm {
-                // EDI contains the weapon pointer at this point
-                test edi, edi           // Check if NULL
-                jz no_weapon_equipped   // Jump if no weapon
-
-                // Original instruction
-                mov al, [edi + 4]         // Get form type byte
-
-                // Return to next instruction (0x484F9C)
-                push 0x00484F9C
-                ret
-
-                no_weapon_equipped :
-                // No weapon - clean return
-                // Need to restore stack and return
-                pop edi                 // Restore edi (was pushed at 0x484F95)
-                    pop esi                 // Restore esi (was pushed at 0x484F8A)
-                    pop ebx                 // Restore ebx (was pushed at 0x484F89)
-                    add esp, 18h            // Clean up local vars (from 0x484F80)
-                    ret                     // Return to caller
-            }
-        }
-
-        void Install()
-        {
-            WriteRelJump(0x00484F99, (UInt32)&GetDamageHook);
-            _MESSAGE("EquippedWeaponData::GetDamage hook installed");
-        }
-
-    }
-
 	void Install()
 	{
         ApplyTrapDamageFix::Install();
-        GetDamageFix::Install();
         _MESSAGE("All hooks installed");
 	}
 }

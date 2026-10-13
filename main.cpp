@@ -1,18 +1,18 @@
 #include "obse/PluginAPI.h"
 #include "obse/CommandTable.h"
 
-#include "OBSEKeywords/KeywordAPI.h"
-#include "EditorIDMapper/EditorIDMapperAPI.h"
-#include "Hooks.h"
-
 #if OBLIVION
 #include "obse/GameAPI.h"
 
-/*	As of 0020, ExtractArgsEx() and ExtractFormatStringArgs() are no longer directly included in plugin builds.
-	They are available instead through the OBSEScriptInterface.
-	To make it easier to update plugins to account for this, the following can be used.
-	It requires that g_scriptInterface is assigned correctly when the plugin is first loaded.
-*/
+#define ENABLE_EXTRACT_ARGS_MACROS 1
+
+#if ENABLE_EXTRACT_ARGS_MACROS
+
+OBSEScriptInterface* g_scriptInterface = NULL;
+#define ExtractArgsEx(...) g_scriptInterface->ExtractArgsEx(__VA_ARGS__)
+#define ExtractFormatStringArgs(...) g_scriptInterface->ExtractFormatStringArgs(__VA_ARGS__)
+
+#endif
 
 #else
 #include "obse_editor/EditorAPI.h"
@@ -22,30 +22,20 @@
 #include "obse/Script.h"
 #include "obse/GameObjects.h"
 #include <string>
-#include <MediumArmor.h>
 
-IDebugLog		gLog("MediumArmor.log");
+#include "Patches.h"
+
+IDebugLog		gLog("GPEngineFixes.log");
 
 PluginHandle				g_pluginHandle = kPluginHandle_Invalid;
 
 OBSEMessagingInterface* g_msg;
 
-void UnifiedMessageHandler(OBSEMessagingInterface::Message* msg)
-{
-	KeywordAPI::MessageHandler(msg);
-	EditorIDMapper::MessageHandler(msg);
-}
-
 void MessageHandler(OBSEMessagingInterface::Message* msg)
 {
 	switch (msg->type)
 	{
-	case OBSEMessagingInterface::kMessage_PostLoad:
-		g_msg->RegisterListener(g_pluginHandle, nullptr, UnifiedMessageHandler);
-		break;
 	case OBSEMessagingInterface::kMessage_LoadGame:
-		MediumArmor::InstallHooks();
-		MediumArmor::SyncSkillFromMenuQue();
 		break;
 	default:
 		break;
@@ -57,12 +47,10 @@ extern "C" {
 	bool OBSEPlugin_Query(const OBSEInterface* obse, PluginInfo* info)
 	{
 
-		// fill out the info structure
 		info->infoVersion = PluginInfo::kInfoVersion;
-		info->name = "MediumArmor";
+		info->name = "GPEngineFixes";
 		info->version = 1;
 
-		// version checks
 		if (!obse->isEditor)
 		{
 			if (obse->obseVersion < OBSE_VERSION_INTEGER)
@@ -83,15 +71,16 @@ extern "C" {
 		return true;
 	}
 
-	bool OBSEPlugin_Load(OBSEInterface* OBSE)
+	bool OBSEPlugin_Load(const OBSEInterface* obse)
 	{
-		g_pluginHandle = OBSE->GetPluginHandle();
 
-		g_msg = static_cast<OBSEMessagingInterface*>(OBSE->QueryInterface(kInterface_Messaging));
-		g_msg->RegisterListener(g_pluginHandle, "OBSE", MessageHandler);
+		g_pluginHandle = obse->GetPluginHandle();
 
-		EditorIDMapper::Init(g_msg, g_pluginHandle);
-		KeywordAPI::Init(g_msg, g_pluginHandle);
+		OBSEMessagingInterface* msgIntfc = (OBSEMessagingInterface*)obse->QueryInterface(kInterface_Messaging);
+		msgIntfc->RegisterListener(g_pluginHandle, "OBSE", MessageHandler);
+		g_msg = msgIntfc;
+
+		GPEngineFixes::Patches::Install();
 
 		return true;
 	}
